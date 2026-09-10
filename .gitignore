@@ -1,0 +1,85 @@
+# ==========================================
+# Byte-compiled / optimized / DLL files
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# Database & Local User Data
+# ==========================================
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.db-journal
+data/*.sqlite
+data/*.sqlite3
+!data/.gitkeep
+!assets/.gitkeep
+
+# ==========================================
+# Logs & Diagnostic Dumps
+# ==========================================
+*.log
+logs/
+crash.dump
+
+# ==========================================
+# OS & System Generated Files
+# ==========================================
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# ==========================================
+# IDEs, Editors & Workspaces
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# PyInstaller / Build Artifacts (Distribution)
+# ==========================================
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+
+# ==========================================
+# Testing & Coverage
+# ==========================================
+.pytest_cache/
+.coverage
+htmlcov/
