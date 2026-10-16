@@ -1,6 +1,5 @@
 """Windows toast notification manager for Timography."""
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +8,7 @@ class NotificationManager:
         """Initialize the notification manager."""
         self._toaster = None
         self._init_toaster()
-    
+
     def _init_toaster(self):
         try:
             from windows_toasts import WindowsToaster
@@ -17,38 +16,40 @@ class NotificationManager:
         except Exception as e:
             logger.warning(f"Could not initialize toaster: {e}")
             self._toaster = None
-    
-    def send_event_reminder(self, event: dict) -> None:
+
+    def send_event_reminder(self, event: dict) -> bool:
         """Send a toast notification for an upcoming event."""
         if not self._toaster:
-            return
-        
+            return False
+
         try:
             from windows_toasts import Toast
             toast = Toast()
-            
+
             title = f"⏰ {event.get('title', 'Upcoming Event')}"
             start_time = event.get('start_time', '')
             category = event.get('category', 'Uncategorized')
-            
+
             body = f"Starting at {start_time} | {category}"
             if 'description' in event and event['description']:
                 body += f"\n{event['description']}"
-                
+
             toast.text_fields = [title, body]
             self._toaster.show_toast(toast)
+            return True
         except Exception as e:
             logger.error(f"Failed to send event reminder toast: {e}")
-    
+            return False
+
     def send_daily_summary(self, events: list[dict]) -> None:
         """Send morning summary toast."""
         if not self._toaster:
             return
-            
+
         try:
             from windows_toasts import Toast
             toast = Toast()
-            
+
             if not events:
                 toast.text_fields = ["Timography Daily Summary", "No events scheduled today. Enjoy your free day! 🎉"]
             else:
@@ -56,18 +57,18 @@ class NotificationManager:
                 first_event = events[0]
                 title = first_event.get('title', 'Unknown')
                 time = first_event.get('start_time', 'Unknown time')
-                
+
                 toast.text_fields = ["Timography Daily Summary", f"You have {count} event(s) today. First up: {title} at {time}"]
-            
+
             self._toaster.show_toast(toast)
         except Exception as e:
             logger.error(f"Failed to send daily summary toast: {e}")
-    
+
     def send_simple(self, title: str, message: str) -> None:
         """Send a simple toast notification."""
         if not self._toaster:
             return
-            
+
         try:
             from windows_toasts import Toast
             toast = Toast()
@@ -84,7 +85,7 @@ class NotificationManager:
             from windows_toasts import Toast
             toast = Toast()
             title = "☀️ Good Morning! Your Daily Briefing"
-            
+
             lines = []
             ev_count = len(events)
             if ev_count > 0:

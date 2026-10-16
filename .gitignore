@@ -83,3 +83,10 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
+artifacts/ui-audit/
+*.db-wal
+*.db-shm
+data/*.lock
+data/backups/
+artifacts/release-qa/

@@ -10,6 +10,7 @@ into structured event dictionaries.
 import re
 from datetime import datetime, date, timedelta
 from ui.theme import CATEGORY_COLORS
+from core.validation import validate_schedule
 
 WEEKDAYS = {
     "monday": 0, "mon": 0,
@@ -54,6 +55,8 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
         reference_date = datetime.now().date()
 
     original_text = text.strip()
+    if not original_text:
+        raise ValueError("Enter an event description.")
     working_text = " " + original_text.lower() + " "
 
     target_date = reference_date
@@ -109,8 +112,8 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
                     target_date = date(year, m_num, d_num)
                     if target_date < reference_date:
                         target_date = date(year + 1, m_num, d_num)
-                except ValueError:
-                    pass
+                except ValueError as exc:
+                    raise ValueError("Enter a valid calendar date.") from exc
                 working_text = working_text[:month_match.start()] + " " + working_text[month_match.end():]
 
     # 3. Parse Time Range or Single Time
@@ -156,7 +159,7 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
         elif " afternoon " in working_text:
             start_hour, start_min = 14, 0
             working_text = working_text.replace(" afternoon ", " ")
-        elif " evening " in working_text or " tonight " in original_text.lower():
+        elif " evening " in working_text or re.search(r"\btonight\b", original_text.lower()):
             start_hour, start_min = 18, 0
             working_text = working_text.replace(" evening ", " ")
         else:
@@ -183,7 +186,9 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
         end_hour, end_min = explicit_end
     else:
         start_total = start_hour * 60 + start_min
-        end_total = min(23 * 60 + 59, start_total + duration_minutes)
+        end_total = start_total + duration_minutes
+        if end_total > 1439:
+            raise ValueError("This event crosses midnight. Choose a time within one day.")
         end_hour = end_total // 60
         end_min = end_total % 60
 
@@ -202,13 +207,13 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
     detected_category = "Work"
     lower_orig = original_text.lower()
     for cat, keywords in CATEGORY_KEYWORDS.items():
-        if any(kw in lower_orig for kw in keywords):
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", lower_orig) for kw in keywords):
             detected_category = cat
             break
 
     color = CATEGORY_COLORS.get(detected_category, "#58a6ff")
 
-    return {
+    result = {
         "title": cleaned_title,
         "date": target_date.strftime("%Y-%m-%d"),
         "start_time": f"{start_hour:02d}:{start_min:02d}",
@@ -216,3 +221,5 @@ def parse_natural_event(text: str, reference_date: date = None) -> dict:
         "category": detected_category,
         "color": color,
     }
+    validate_schedule(result)
+    return result

@@ -1,4 +1,5 @@
 """Lightweight animation engine for Timography using tkinter .after() loops."""
+from time import monotonic
 
 
 def ease_out_cubic(t: float) -> float:
@@ -73,7 +74,9 @@ class Animation:
         self._after_id = None
 
     def start(self):
+        self.stop()
         self._elapsed = 0
+        self._started_at = monotonic()
         self._running = True
         self._tick()
 
@@ -89,7 +92,7 @@ class Animation:
     def _tick(self):
         if not self._running:
             return
-        self._elapsed += self.INTERVAL
+        self._elapsed = (monotonic() - self._started_at) * 1000
         raw_t = min(1.0, self._elapsed / self.duration_ms)
         eased_t = self.easing(raw_t)
 

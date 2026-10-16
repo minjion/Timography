@@ -1,14 +1,16 @@
 """Raycast/Spotlight-style floating Quick-Add bar with real-time NLP parsing."""
-from datetime import datetime
 import customtkinter as ctk
-from ui.theme import COLORS, FONTS, CARD_CORNER_RADIUS, BUTTON_CORNER_RADIUS
+from ui.controls import AppButton, AppToplevel
+from tkinter import messagebox
+from ui.theme import theme_color
+from ui.theme import FONTS, CARD_CORNER_RADIUS
 from core.nlp_parser import parse_natural_event
 from core.auto_scheduler import AutoScheduler
 from core.database import TimographyDB
 from core.undo_manager import UndoManager
 
 
-class QuickAddDialog(ctk.CTkToplevel):
+class QuickAddDialog(AppToplevel):
     def __init__(self, master, db: TimographyDB, on_created_callback=None, undo_mgr: UndoManager = None):
         super().__init__(master)
         self.db = db
@@ -19,7 +21,7 @@ class QuickAddDialog(ctk.CTkToplevel):
         self.title("Quick Add Event")
         self.geometry("520x260")
         self.resizable(False, False)
-        self.configure(fg_color=COLORS["bg_primary"])
+        self.configure(fg_color=theme_color("bg_primary"))
         self.wm_attributes("-topmost", True)
 
         # Center on screen
@@ -38,23 +40,23 @@ class QuickAddDialog(ctk.CTkToplevel):
         self.entry_input.focus_force()
 
     def _build_ui(self):
-        container = ctk.CTkFrame(self, fg_color=COLORS["bg_secondary"], corner_radius=CARD_CORNER_RADIUS)
+        container = ctk.CTkFrame(self, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
         container.pack(fill="both", expand=True, padx=12, pady=12)
 
         # Top Bar: Icon + Input
         top_row = ctk.CTkFrame(container, fg_color="transparent")
         top_row.pack(fill="x", padx=16, pady=(16, 10))
 
-        icon_lbl = ctk.CTkLabel(top_row, text="⚡", font=FONTS["heading"], text_color=COLORS["accent"])
+        icon_lbl = ctk.CTkLabel(top_row, text="⚡", font=FONTS["heading"], text_color=theme_color("accent"))
         icon_lbl.pack(side="left", padx=(0, 10))
 
         self.entry_input = ctk.CTkEntry(
             top_row,
             placeholder_text="Type event (e.g. 'Study math tomorrow 2pm for 90m')...",
             font=FONTS["body"],
-            fg_color=COLORS["bg_tertiary"],
-            border_color=COLORS["border"],
-            text_color=COLORS["text_primary"],
+            fg_color=theme_color("bg_tertiary"),
+            border_color=theme_color("border"),
+            text_color=theme_color("text_primary"),
             height=38
         )
         self.entry_input.pack(side="left", fill="x", expand=True)
@@ -62,7 +64,7 @@ class QuickAddDialog(ctk.CTkToplevel):
         self.entry_input.bind("<Return>", lambda e: self._save_event())
 
         # Live NLP Preview Box
-        self.preview_frame = ctk.CTkFrame(container, fg_color=COLORS["bg_tertiary"], corner_radius=8, height=90)
+        self.preview_frame = ctk.CTkFrame(container, fg_color=theme_color("bg_tertiary"), corner_radius=8, height=90)
         self.preview_frame.pack(fill="x", padx=16, pady=(0, 12))
         self.preview_frame.pack_propagate(False)
 
@@ -70,7 +72,7 @@ class QuickAddDialog(ctk.CTkToplevel):
             self.preview_frame,
             text="Type above to preview event...",
             font=FONTS["body_bold"],
-            text_color=COLORS["text_primary"],
+            text_color=theme_color("text_primary"),
             anchor="w"
         )
         self.lbl_preview_title.pack(fill="x", padx=14, pady=(10, 4))
@@ -82,7 +84,7 @@ class QuickAddDialog(ctk.CTkToplevel):
             meta_row,
             text="",
             font=FONTS["small"],
-            text_color=COLORS["text_secondary"]
+            text_color=theme_color("text_secondary")
         )
         self.lbl_preview_datetime.pack(side="left")
 
@@ -90,8 +92,8 @@ class QuickAddDialog(ctk.CTkToplevel):
             meta_row,
             text="Work",
             font=FONTS["micro"],
-            text_color=COLORS["bg_primary"],
-            fg_color=COLORS["accent"],
+            text_color=theme_color("on_accent"),
+            fg_color=theme_color("accent"),
             corner_radius=8,
             width=65,
             height=20
@@ -102,38 +104,38 @@ class QuickAddDialog(ctk.CTkToplevel):
         bottom_row = ctk.CTkFrame(container, fg_color="transparent")
         bottom_row.pack(fill="x", padx=16, pady=(0, 12))
 
-        btn_auto = ctk.CTkButton(
+        btn_auto = AppButton(
             bottom_row,
             text="Auto-Schedule Slot ⚡",
             font=FONTS["small_bold"],
-            fg_color=COLORS["bg_tertiary"],
-            hover_color=COLORS["border"],
-            text_color=COLORS["accent_purple"],
+            fg_color=theme_color("bg_tertiary"),
+            hover_color=theme_color("border"),
+            text_color=theme_color("accent_purple"),
             height=34,
             command=self._auto_schedule_slot
         )
         btn_auto.pack(side="left")
 
-        btn_cancel = ctk.CTkButton(
+        btn_cancel = AppButton(
             bottom_row,
             text="Cancel [Esc]",
             font=FONTS["small"],
             fg_color="transparent",
-            hover_color=COLORS["bg_tertiary"],
-            text_color=COLORS["text_muted"],
+            hover_color=theme_color("bg_tertiary"),
+            text_color=theme_color("text_muted"),
             width=80,
             height=34,
             command=self.destroy
         )
         btn_cancel.pack(side="right", padx=(8, 0))
 
-        btn_create = ctk.CTkButton(
+        btn_create = AppButton(
             bottom_row,
             text="Create [Enter]",
             font=FONTS["body_bold"],
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_hover"],
-            text_color=COLORS["bg_primary"],
+            fg_color=theme_color("accent"),
+            hover_color=theme_color("accent_hover"),
+            text_color=theme_color("on_accent"),
             width=110,
             height=34,
             command=self._save_event
@@ -148,7 +150,13 @@ class QuickAddDialog(ctk.CTkToplevel):
             self.parsed_data = {}
             return
 
-        self.parsed_data = parse_natural_event(text)
+        try:
+            self.parsed_data = parse_natural_event(text)
+        except ValueError as exc:
+            self.parsed_data = {}
+            self.lbl_preview_title.configure(text="Check event details")
+            self.lbl_preview_datetime.configure(text=str(exc))
+            return
         title = self.parsed_data["title"]
         dt = self.parsed_data["date"]
         st = self.parsed_data["start_time"]
@@ -164,10 +172,14 @@ class QuickAddDialog(ctk.CTkToplevel):
         text = self.entry_input.get().strip()
         if not text:
             return
-        parsed = parse_natural_event(text)
+        try:
+            parsed = parse_natural_event(text)
+        except ValueError as exc:
+            self.lbl_preview_datetime.configure(text=str(exc))
+            return
         sh, sm = map(int, parsed["start_time"].split(":"))
         eh, em = map(int, parsed["end_time"].split(":"))
-        dur = max(30, (eh * 60 + em) - (sh * 60 + sm))
+        dur = (eh * 60 + em) - (sh * 60 + sm)
 
         slot = self.auto_scheduler.suggest_best_slot(parsed["date"], duration_minutes=dur, category=parsed["category"])
         if slot:
@@ -183,7 +195,11 @@ class QuickAddDialog(ctk.CTkToplevel):
             text = self.entry_input.get().strip()
             if not text:
                 return
-            self.parsed_data = parse_natural_event(text)
+            try:
+                self.parsed_data = parse_natural_event(text)
+            except ValueError as exc:
+                messagebox.showerror("Check event details", str(exc), parent=self)
+                return
 
         ev_id = self.db.add_event(
             title=self.parsed_data["title"],
@@ -194,8 +210,11 @@ class QuickAddDialog(ctk.CTkToplevel):
             color=self.parsed_data["color"],
             category=self.parsed_data["category"],
             recurring="none",
-            reminder_minutes=10
+            reminder_minutes=self.db.get_int_setting("default_reminder", 10, 0, 120)
         )
+        if ev_id == -1:
+            messagebox.showerror("Save failed", "The event could not be created.", parent=self)
+            return
 
         if self.undo_mgr and ev_id != -1:
             self.undo_mgr.record("add", "event", ev_id, None, self.parsed_data)

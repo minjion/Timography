@@ -13,14 +13,16 @@ class ReminderScheduler:
         self.notifier = notifier
         self.scheduler = BackgroundScheduler(daemon=True)
         self._setup_jobs()
-    
+
     def _setup_jobs(self):
         # Job 1: Check reminders every 30 seconds
         self.scheduler.add_job(
             self.check_reminders, 'interval', seconds=30, id='reminder_check',
             max_instances=1, coalesce=True
         )
-        # Job 2: Morning Briefing at 07:30
+        self.scheduler.add_job(self.check_streak_warning, 'cron', hour=21,
+                               id='streak_warning', max_instances=1, coalesce=True)
+        # Job 2: Morning Briefing at the saved hour.
         self.scheduler.add_job(
             self.send_daily_summary, 'cron', hour=7, minute=30, id='daily_summary',
             max_instances=1, coalesce=True
@@ -30,31 +32,40 @@ class ReminderScheduler:
             self.send_weekly_recap, 'cron', day_of_week='sun', hour=20, minute=0, id='weekly_recap',
             max_instances=1, coalesce=True
         )
-    
+        self.reload_settings()
+
+    def reload_settings(self):
+        hour = self.db.get_int_setting("morning_briefing_hour", 8, 0, 23)
+        self.scheduler.reschedule_job('daily_summary', trigger='cron', hour=hour, minute=0)
+
     def start(self):
         self.scheduler.start()
         logger.info("Reminder scheduler started")
-    
+
     def stop(self):
-        self.scheduler.shutdown(wait=False)
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=True)
         logger.info("Reminder scheduler stopped")
-    
+
     def check_reminders(self):
         """Check for events that need reminders fired now."""
         try:
             now = datetime.now()
             due = self.db.get_upcoming_reminders(now)
             for event in due:
-                self.notifier.send_event_reminder(event)
-                self.db.mark_reminder_sent(event['id'], now.strftime('%Y-%m-%d'))
-                logger.info(f"Sent reminder for event: {event.get('title')}")
+                if self.notifier.send_event_reminder(event):
+                    self.db.mark_reminder_sent(event['id'], event.get('occurrence_date', now.strftime('%Y-%m-%d')))
+                    logger.info(f"Sent reminder for event: {event.get('title')}")
         except Exception as e:
             logger.error(f"Reminder check error: {e}")
-    
+
     def send_daily_summary(self):
+        if self.db.get_setting("morning_briefing", "1") != "1":
+            return
         try:
             today_str = datetime.now().strftime('%Y-%m-%d')
             events = self.db.get_events_for_date(today_str, include_routines=True)
+            self.db.generate_checklist_for_date(today_str)
             stats = self.db.get_checklist_stats(today_str)
             exams = self.db.get_upcoming_exams(limit=2)
             streak = self.db.get_study_streak()
@@ -63,6 +74,8 @@ class ReminderScheduler:
             logger.error(f"Daily summary error: {e}")
 
     def send_weekly_recap(self):
+        if self.db.get_setting("weekly_recap", "1") != "1":
+            return
         try:
             from datetime import timedelta
             today = datetime.now().date()
@@ -74,4 +87,12 @@ class ReminderScheduler:
             self.notifier.send_weekly_recap(total_hours, top_cat, streak)
         except Exception as e:
             logger.error(f"Weekly recap error: {e}")
+
+    def check_streak_warning(self):
+        if self.db.get_setting("streak_warnings", "1") != "1":
+            return
+        streak = self.db.get_study_streak()
+        if streak["current"] > 0 and streak["today_minutes"] < streak["goal_minutes"]:
+            self.notifier.send_simple("Streak at risk",
+                f"Complete your {streak['goal_minutes']}-minute daily goal to keep your {streak['current']}-day streak.")
 

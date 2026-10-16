@@ -1,6 +1,6 @@
 """Smart Auto-Scheduler and Gap Suggestion Engine for Timography."""
-from datetime import datetime, timedelta
 from core.database import TimographyDB
+from datetime import datetime
 
 
 class AutoScheduler:
@@ -10,6 +10,21 @@ class AutoScheduler:
     def suggest_best_slot(self, date_str: str, duration_minutes: int = 60, category: str = "Study") -> dict | None:
         """Find the optimal free time window for a task based on category preferences."""
         free_slots = self.db.find_free_slots(date_str, duration_minutes, min_hour=8, max_hour=22)
+        now = datetime.now()
+        if date_str < now.date().isoformat():
+            return None
+        if date_str == now.date().isoformat():
+            next_quarter = ((now.hour * 60 + now.minute) // 15 + 1) * 15
+            remaining_slots = []
+            for slot in free_slots:
+                sh, sm = map(int, slot["start"].split(":"))
+                eh, em = map(int, slot["max_end"].split(":"))
+                start, end = max(sh * 60 + sm, next_quarter), eh * 60 + em
+                if end - start >= duration_minutes:
+                    remaining_slots.append({**slot, "start": f"{start // 60:02d}:{start % 60:02d}",
+                        "end": f"{(start + duration_minutes) // 60:02d}:{(start + duration_minutes) % 60:02d}",
+                        "available_minutes": end - start})
+            free_slots = remaining_slots
         if not free_slots:
             return None
 
@@ -40,8 +55,20 @@ class AutoScheduler:
             waste_penalty = abs(slot["available_minutes"] - duration_minutes) * 0.2
             return min_dist + waste_penalty
 
-        free_slots.sort(key=score_slot)
-        return free_slots[0]
+        # A free interval may start before a preferred window. Consider starts
+        # inside it, rather than ranking only the beginning of each gap.
+        candidates = list(free_slots)
+        for slot in free_slots:
+            start = int(slot["start"][:2]) * 60 + int(slot["start"][3:])
+            end = int(slot["max_end"][:2]) * 60 + int(slot["max_end"][3:])
+            for preferred_start, preferred_end in prefs:
+                candidate = max(start, preferred_start)
+                if candidate + duration_minutes <= min(end, preferred_end):
+                    candidates.append({**slot, "start": f"{candidate // 60:02d}:{candidate % 60:02d}",
+                        "end": f"{(candidate + duration_minutes) // 60:02d}:{(candidate + duration_minutes) % 60:02d}",
+                        "available_minutes": end - candidate})
+        candidates.sort(key=score_slot)
+        return candidates[0]
 
     def get_smart_suggestions(self, date_str: str) -> list[dict]:
         """Analyze the day's schedule and return actionable productivity insights & suggestions."""
@@ -73,39 +100,22 @@ class AutoScheduler:
 
         parsed_events.sort(key=lambda x: x["start"])
 
-        # Check for long continuous busy blocks (> 3 hours)
-        current_streak = 0
-        streak_start = None
-        for i, ev in enumerate(parsed_events):
-            if streak_start is None:
-                streak_start = ev["start"]
-                current_streak = ev["end"] - ev["start"]
+        # Merge nested/overlapping events before measuring continuous busy spans.
+        blocks = []
+        for event in parsed_events:
+            if event["end"] <= event["start"]:
+                continue
+            if blocks and event["start"] - blocks[-1][1] < 15:
+                blocks[-1][1] = max(blocks[-1][1], event["end"])
             else:
-                gap = ev["start"] - parsed_events[i - 1]["end"]
-                if gap < 15:
-                    current_streak += (ev["end"] - parsed_events[i - 1]["end"])
-                else:
-                    if current_streak >= 180:
-                        s_time = f"{streak_start // 60:02d}:{streak_start % 60:02d}"
-                        e_time = f"{parsed_events[i - 1]['end'] // 60:02d}:{parsed_events[i - 1]['end'] % 60:02d}"
-                        suggestions.append({
-                            "type": "fatigue_warning",
-                            "icon": "☕",
-                            "message": f"{current_streak // 60}h+ of continuous activity ({s_time} - {e_time}). Remember to take a breather!",
-                            "action": None
-                        })
-                    streak_start = ev["start"]
-                    current_streak = ev["end"] - ev["start"]
-
-        if current_streak >= 180:
-            s_time = f"{streak_start // 60:02d}:{streak_start % 60:02d}"
-            e_time = f"{parsed_events[-1]['end'] // 60:02d}:{parsed_events[-1]['end'] % 60:02d}"
-            suggestions.append({
-                "type": "fatigue_warning",
-                "icon": "☕",
-                "message": f"{current_streak // 60}h+ of continuous activity ({s_time} - {e_time}). Remember to take a breather!",
-                "action": None
-            })
+                blocks.append([event["start"], event["end"]])
+        for start, end in blocks:
+            duration = end - start
+            if duration >= 180:
+                suggestions.append({"type": "fatigue_warning", "icon": "☕",
+                    "message": f"{duration // 60}h+ of continuous activity "
+                               f"({start // 60:02d}:{start % 60:02d} - {end // 60:02d}:{end % 60:02d}). "
+                               "Remember to take a breather!", "action": None})
 
         # Check for high-value open gaps (45 to 120 mins) during midday/afternoon
         free_slots = self.db.find_free_slots(date_str, duration_minutes=45, min_hour=9, max_hour=19)

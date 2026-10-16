@@ -23,12 +23,24 @@ class CanvasTooltip:
         self._tip_window = None
         self._after_id = None
         self._current_text = ""
+        self._bindings = []
+        self._fade_after_id = None
 
     def bind_item(self, item_id, text: str):
         """Bind tooltip to a canvas item by its id."""
-        self.canvas.tag_bind(item_id, "<Enter>", lambda e, t=text: self._schedule_show(e, t))
-        self.canvas.tag_bind(item_id, "<Leave>", lambda e: self._hide())
-        self.canvas.tag_bind(item_id, "<Motion>", lambda e, t=text: self._on_motion(e, t))
+        for sequence, callback in (
+            ("<Enter>", lambda e, t=text: self._schedule_show(e, t)),
+            ("<Leave>", lambda e: self._hide()),
+            ("<Motion>", lambda e, t=text: self._on_motion(e, t)),
+        ):
+            binding = self.canvas.tag_bind(item_id, sequence, callback, add="+")
+            self._bindings.append((item_id, sequence, binding))
+
+    def clear(self):
+        self._hide()
+        for item, sequence, binding in self._bindings:
+            self.canvas.tag_unbind(item, sequence, binding)
+        self._bindings.clear()
 
     def _schedule_show(self, event, text):
         self._cancel()
@@ -104,9 +116,12 @@ class CanvasTooltip:
             window.attributes("-alpha", alpha)
         except Exception:
             return
-        window.after(16, lambda: self._fade_in(window, current_alpha, target_alpha, step + 1))
+        self._fade_after_id = window.after(16, lambda: self._fade_in(window, current_alpha, target_alpha, step + 1))
 
     def _hide(self):
+        if self._tip_window and self._fade_after_id:
+            self._tip_window.after_cancel(self._fade_after_id)
+            self._fade_after_id = None
         self._cancel()
         self._current_text = ""
         if self._tip_window:

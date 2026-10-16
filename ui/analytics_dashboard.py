@@ -2,9 +2,12 @@
 from datetime import datetime, date, timedelta
 import tkinter as tk
 import customtkinter as ctk
-from ui.theme import COLORS, FONTS, CATEGORY_COLORS, CARD_CORNER_RADIUS, BUTTON_CORNER_RADIUS
+from ui.controls import AppToplevel
+from ui.scrolling import ScrollableFrame
+from ui.theme import theme_color
+from ui.theme import COLORS, FONTS, CATEGORY_COLORS, CARD_CORNER_RADIUS, SIZES
 from core.database import TimographyDB
-from core.analytics import calculate_focus_score, get_weekly_insights
+from core.analytics import get_weekly_insights, calculate_focus_score
 from ui.heatmap import ActivityHeatmap
 
 
@@ -16,19 +19,20 @@ class AnalyticsView(ctk.CTkFrame):
         self.period_mode = "week"  # "week", "month", "30d", "year"
 
         self._build_ui()
-        self.refresh()
+        self._refresh_key = None
 
     def _build_ui(self):
         # Top Header & Period Selector
         top_bar = ctk.CTkFrame(self, fg_color="transparent", height=44)
         top_bar.pack(fill="x", padx=20, pady=(14, 8))
 
-        ctk.CTkLabel(
+        self.top_title = ctk.CTkLabel(
             top_bar,
             text="Productivity & Time Analytics",
             font=FONTS["heading"],
-            text_color=COLORS["text_primary"]
-        ).pack(side="left")
+            text_color=theme_color("text_primary")
+        )
+        self.top_title.pack(side="left")
 
         self.seg_period = ctk.CTkSegmentedButton(
             top_bar,
@@ -39,8 +43,19 @@ class AnalyticsView(ctk.CTkFrame):
         self.seg_period.set("This Week")
         self.seg_period.pack(side="right")
 
+        self.include_routines_var = ctk.BooleanVar(value=False)
+        self.switch_routines = ctk.CTkSwitch(
+            top_bar,
+            text="Include Routines",
+            font=FONTS["small"],
+            variable=self.include_routines_var,
+            command=self.refresh,
+            progress_color=theme_color("accent")
+        )
+        self.switch_routines.pack(side="right", padx=(0, 16))
+
         # Scrollable dashboard body
-        self.scroll_body = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.scroll_body = ScrollableFrame(self, fg_color="transparent")
         self.scroll_body.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
         # 1. 4 Metric Cards in a Grid
@@ -52,14 +67,16 @@ class AnalyticsView(ctk.CTkFrame):
         # Card 1: Total Hours
         self.card_hours = self._create_kpi_card(cards_grid, 0, "TOTAL SCHEDULED", "-- hrs", "Across events & routines", COLORS["accent"])
 
-        # Card 2: Focus Score
-        self.card_focus = self._create_kpi_card(cards_grid, 1, "FOCUS SCORE", "-- / 100", "Daily concentration metric", COLORS["accent_green"])
+        # Card 2: Focus Time (Real dynamic calculation: Study + Work + Pomodoro across period)
+        self.card_focus = self._create_kpi_card(cards_grid, 1, "FOCUS TIME", "-- hrs", "Deep work & study", COLORS["accent_green"])
 
-        # Card 3: Pomodoro Time
-        self.card_pomo = self._create_kpi_card(cards_grid, 2, "POMODORO TIME", "-- min", "Logged focus sessions", COLORS["accent_purple"])
+        # Card 3: Focus Score (Dynamic focus rating across period)
+        self.card_pomo = self._create_kpi_card(cards_grid, 2, "TODAY'S FOCUS GOAL", "-- %", "Recorded minutes / goal", COLORS["accent_purple"])
 
         # Card 4: Study Streak
-        self.card_streak = self._create_kpi_card(cards_grid, 3, "STUDY STREAK", "🔥 0 Days", "Consecutive study days", COLORS["accent_orange"])
+        self.card_streak = self._create_kpi_card(cards_grid, 3, "FOCUS GOAL STREAK", "🔥 0 Days", "Recorded focus", COLORS["accent_orange"])
+
+        self.kpi_cards = [self.card_hours, self.card_focus, self.card_pomo, self.card_streak]
 
         # 2. Charts Row: Donut Chart on Left, Daily Bar Chart on Right
         charts_row = ctk.CTkFrame(self.scroll_body, fg_color="transparent")
@@ -68,14 +85,14 @@ class AnalyticsView(ctk.CTkFrame):
         charts_row.columnconfigure(1, weight=1)
 
         # Left: Donut Chart Card
-        self.pie_frame = ctk.CTkFrame(charts_row, fg_color=COLORS["bg_secondary"], corner_radius=CARD_CORNER_RADIUS)
+        self.pie_frame = ctk.CTkFrame(charts_row, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
         self.pie_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         self.lbl_pie_title = ctk.CTkLabel(
             self.pie_frame,
             text="CATEGORY DISTRIBUTION (THIS WEEK)",
             font=FONTS["micro"],
-            text_color=COLORS["text_muted"]
+            text_color=theme_color("text_muted")
         )
         self.lbl_pie_title.pack(anchor="w", padx=16, pady=(12, 4))
 
@@ -83,44 +100,70 @@ class AnalyticsView(ctk.CTkFrame):
         self.canvas_pie.pack(fill="both", expand=True, padx=12, pady=(0, 10))
 
         # Right: Bar Chart Card
-        self.bar_frame = ctk.CTkFrame(charts_row, fg_color=COLORS["bg_secondary"], corner_radius=CARD_CORNER_RADIUS)
+        self.bar_frame = ctk.CTkFrame(charts_row, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
         self.bar_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         self.lbl_bar_title = ctk.CTkLabel(
             self.bar_frame,
             text="DAILY WORKLOAD (HOURS PER DAY)",
             font=FONTS["micro"],
-            text_color=COLORS["text_muted"]
+            text_color=theme_color("text_muted")
         )
         self.lbl_bar_title.pack(anchor="w", padx=16, pady=(12, 4))
 
         self.canvas_bar = tk.Canvas(self.bar_frame, bg=COLORS["bg_secondary"], bd=0, highlightthickness=0, height=220)
         self.canvas_bar.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self._chart_data = None
+        self.canvas_pie.bind("<Configure>", self._redraw_charts)
+        self.canvas_bar.bind("<Configure>", self._redraw_charts)
 
-        # 3. Heatmap Row
-        heatmap_container = ctk.CTkFrame(self.scroll_body, fg_color=COLORS["bg_secondary"], corner_radius=CARD_CORNER_RADIUS)
-        heatmap_container.pack(fill="x", pady=(0, 12))
+        # 3. Heatmap & Insights Row (2 columns)
+        bottom_row = ctk.CTkFrame(self.scroll_body, fg_color="transparent")
+        bottom_row.pack(fill="x", pady=(0, 12))
+        bottom_row.columnconfigure(0, weight=3)
+        bottom_row.columnconfigure(1, weight=2)
 
-        ctk.CTkLabel(
-            heatmap_container,
+        # Left: Heatmap Container
+        self.heatmap_container = ctk.CTkFrame(bottom_row, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
+        self.heatmap_container.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self.lbl_heatmap_title = ctk.CTkLabel(
+            self.heatmap_container,
             text="ANNUAL ACTIVITY HEATMAP (PAST 28 WEEKS)",
             font=FONTS["micro"],
-            text_color=COLORS["text_muted"]
-        ).pack(anchor="w", padx=16, pady=(12, 4))
+            text_color=theme_color("text_muted")
+        )
+        self.lbl_heatmap_title.pack(anchor="w", padx=16, pady=(12, 4))
 
-        self.heatmap = ActivityHeatmap(heatmap_container, weeks=28)
+        self.heatmap = ActivityHeatmap(self.heatmap_container, weeks=28)
         self.heatmap.pack(fill="x", padx=12, pady=(0, 12))
 
+        # Right: Productivity Insights Card
+        self.insights_frame = ctk.CTkFrame(bottom_row, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
+        self.insights_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self.lbl_insights_title = ctk.CTkLabel(
+            self.insights_frame,
+            text="PRODUCTIVITY INSIGHTS & HIGHLIGHTS",
+            font=FONTS["micro"],
+            text_color=theme_color("text_muted")
+        )
+        self.lbl_insights_title.pack(anchor="w", padx=16, pady=(12, 4))
+
+        self.insights_body = ctk.CTkFrame(self.insights_frame, fg_color="transparent")
+        self.insights_body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+
     def _create_kpi_card(self, parent, col, title, initial_val, subtitle, color):
-        f = ctk.CTkFrame(parent, fg_color=COLORS["bg_secondary"], corner_radius=CARD_CORNER_RADIUS)
+        f = ctk.CTkFrame(parent, fg_color=theme_color("bg_secondary"), corner_radius=CARD_CORNER_RADIUS)
         f.grid(row=0, column=col, sticky="nsew", padx=4)
 
-        ctk.CTkLabel(f, text=title, font=FONTS["micro"], text_color=COLORS["text_muted"]).pack(anchor="w", padx=14, pady=(10, 2))
-        lbl_val = ctk.CTkLabel(f, text=initial_val, font=("Segoe UI", 24, "bold"), text_color=color)
+        lbl_title = ctk.CTkLabel(f, text=title, font=FONTS["micro"], text_color=theme_color("text_muted"))
+        lbl_title.pack(anchor="w", padx=14, pady=(10, 2))
+        lbl_val = ctk.CTkLabel(f, text=initial_val, font=("Segoe UI", SIZES['kpi_value_font_size'], "bold"), text_color=color)
         lbl_val.pack(anchor="w", padx=14)
-        lbl_sub = ctk.CTkLabel(f, text=subtitle, font=FONTS["micro"], text_color=COLORS["text_secondary"])
+        lbl_sub = ctk.CTkLabel(f, text=subtitle, font=FONTS["micro"], text_color=theme_color("text_secondary"))
         lbl_sub.pack(anchor="w", padx=14, pady=(0, 10))
-        return {"val": lbl_val, "sub": lbl_sub}
+        return {"frame": f, "title": lbl_title, "val": lbl_val, "sub": lbl_sub}
 
     def _on_period_change(self, value):
         mapping = {
@@ -129,13 +172,15 @@ class AnalyticsView(ctk.CTkFrame):
             "Past 30 Days": "30d",
             "Year to Date": "year"
         }
+        self.seg_period.set(value)
         self.period_mode = mapping.get(value, "week")
         self.refresh()
 
     def _get_date_range(self):
         today = self.current_date
         if self.period_mode == "week":
-            start_d = today - timedelta(days=today.weekday())
+            first = 6 if self.db.get_setting("week_start", "monday") == "sunday" else 0
+            start_d = today - timedelta(days=(today.weekday() - first) % 7)
             end_d = start_d + timedelta(days=6)
         elif self.period_mode == "month":
             start_d = date(today.year, today.month, 1)
@@ -149,51 +194,157 @@ class AnalyticsView(ctk.CTkFrame):
             end_d = today
         return start_d, end_d
 
+    def reapply_theme(self):
+        """Re-skin analytics dashboard in-place when theme toggles."""
+        try:
+            if hasattr(self, "top_title"):
+                self.top_title.configure(text_color=theme_color("text_primary"))
+            if hasattr(self, "switch_routines"):
+                self.switch_routines.configure(progress_color=theme_color("accent"))
+
+            if hasattr(self, "kpi_cards"):
+                for card in self.kpi_cards:
+                    card["frame"].configure(fg_color=theme_color("bg_secondary"))
+                    card["title"].configure(text_color=theme_color("text_muted"))
+                    card["sub"].configure(text_color=theme_color("text_secondary"))
+
+            if hasattr(self, "pie_frame"):
+                self.pie_frame.configure(fg_color=theme_color("bg_secondary"))
+            if hasattr(self, "lbl_pie_title"):
+                self.lbl_pie_title.configure(text_color=theme_color("text_muted"))
+            if hasattr(self, "canvas_pie"):
+                self.canvas_pie.configure(bg=COLORS["bg_secondary"])
+
+            if hasattr(self, "bar_frame"):
+                self.bar_frame.configure(fg_color=theme_color("bg_secondary"))
+            if hasattr(self, "lbl_bar_title"):
+                self.lbl_bar_title.configure(text_color=theme_color("text_muted"))
+            if hasattr(self, "canvas_bar"):
+                self.canvas_bar.configure(bg=COLORS["bg_secondary"])
+
+            if hasattr(self, "heatmap_container"):
+                self.heatmap_container.configure(fg_color=theme_color("bg_secondary"))
+            if hasattr(self, "lbl_heatmap_title"):
+                self.lbl_heatmap_title.configure(text_color=theme_color("text_muted"))
+            if hasattr(self, "heatmap") and hasattr(self.heatmap, "reapply_theme"):
+                self.heatmap.reapply_theme()
+
+            if hasattr(self, "insights_frame"):
+                self.insights_frame.configure(fg_color=theme_color("bg_secondary"))
+            if hasattr(self, "lbl_insights_title"):
+                self.lbl_insights_title.configure(text_color=theme_color("text_muted"))
+        except Exception:
+            pass
+        self.refresh()
+
     def refresh(self):
+        self.current_date = datetime.now().date()
+        key = (self.current_date, self.seg_period.get(), self.include_routines_var.get(),
+               self.db.get_revision(), tuple(COLORS.values()))
+        if key == self._refresh_key:
+            return
+        self._refresh_key = key
+        self._category_colors = {c["name"]: c["color"] for c in self.db.get_all_categories()}
         start_d, end_d = self._get_date_range()
         start_str = start_d.strftime("%Y-%m-%d")
         end_str = end_d.strftime("%Y-%m-%d")
 
+        inc_routines = self.include_routines_var.get()
+        period_label = self.seg_period.get()
+
         # 1. Real Category Hours Query
-        cat_hours = self.db.get_category_hours_summary(start_str, end_str)
+        cat_hours = self.db.get_category_hours_summary(start_str, end_str, include_routines=inc_routines)
         total_hours = sum(cat_hours.values())
 
         # Update Card 1: Total Hours
         self.card_hours["val"].configure(text=f"{total_hours:.1f} hrs")
-        period_label = self.seg_period.get()
-        self.card_hours["sub"].configure(text=f"Total scheduled ({period_label})")
+        sub_desc = f"Planned events ({period_label})" if not inc_routines else f"Events + routines ({period_label})"
+        self.card_hours["sub"].configure(text=sub_desc)
 
-        # Update Card 2: Focus Score
-        today_str = self.current_date.strftime("%Y-%m-%d")
-        score_data = calculate_focus_score(self.db, today_str)
-        self.card_focus["val"].configure(text=f"{score_data['score']} / 100")
-        self.card_focus["sub"].configure(text=f"{score_data['rating']} ({score_data['avg_block_mins']}m avg block)")
+        # Completed focus time is recorded independently of planned hours.
+        pomo_mins = self.db.get_pomodoro_minutes_range(start_str, end_str)
+        pomo_hrs = pomo_mins / 60.0
 
-        # Update Card 3: Pomodoro Time
-        pomo_mins = self.db.get_today_pomodoro_minutes(today_str)
-        p_hrs = pomo_mins / 60.0
-        self.card_pomo["val"].configure(text=f"{p_hrs:.1f} hrs" if p_hrs >= 1 else f"{pomo_mins} min")
-        self.card_pomo["sub"].configure(text="Today's deep work sessions")
+        total_focus_hours = pomo_hrs
+        total_focus_mins = int(total_focus_hours * 60)
+
+        if total_focus_hours >= 1.0:
+            focus_val_str = f"{total_focus_hours:.1f} hrs"
+        else:
+            focus_val_str = f"{total_focus_mins} min"
+
+        self.card_focus["val"].configure(text=focus_val_str)
+        self.card_focus["sub"].configure(text=f"Recorded active work ({period_label})")
+
+        focus = calculate_focus_score(self.db, self.current_date.isoformat())
+        focus_score, score_rating = focus["score"], focus["rating"]
+        self.card_pomo["val"].configure(text=f"{focus_score}%")
+        self.card_pomo["sub"].configure(text=f"{score_rating} · {focus['pomodoro_mins']}/{focus['goal_minutes']} min")
 
         # Update Card 4: Study Streak
         streak_data = self.db.get_study_streak()
         cur_streak = streak_data.get("current", 0)
         best_streak = streak_data.get("best", 0)
+        today_mins = streak_data.get("today_minutes", 0)
+        goal_mins = streak_data.get("goal_minutes", 30)
         self.card_streak["val"].configure(text=f"🔥 {cur_streak} Day{'s' if cur_streak != 1 else ''}")
-        self.card_streak["sub"].configure(text=f"All-time record: {best_streak} days")
+        self.card_streak["sub"].configure(text=f"{today_mins}/{goal_mins} min today · Record: {best_streak} days")
 
         # 2. Draw Category Donut Chart
         self.lbl_pie_title.configure(text=f"CATEGORY DISTRIBUTION ({period_label.upper()})")
         self._draw_pie_chart(cat_hours, total_hours)
 
         # 3. Draw Daily Workload Bar Chart
-        daily_hours = self.db.get_daily_hours_summary(start_str, end_str)
+        daily_hours = self.db.get_daily_hours_summary(start_str, end_str, include_routines=inc_routines)
         self.lbl_bar_title.configure(text=f"DAILY WORKLOAD ({period_label.upper()})")
         self._draw_bar_chart(daily_hours, start_d, end_d)
 
         # 4. Refresh Heatmap with full annual data
-        heatmap_data = self.db.get_heatmap_data(self.current_date.year)
+        heatmap_start = self.current_date - timedelta(weeks=28)
+        heatmap_data = self.db.get_daily_hours_summary(heatmap_start.isoformat(), self.current_date.isoformat(), include_routines=inc_routines)
         self.heatmap.set_data(heatmap_data)
+        self._chart_data = (cat_hours, total_hours, daily_hours, start_d, end_d)
+
+        # 5. Populate Productivity Insights Card
+        if hasattr(self, "insights_body"):
+            for w in self.insights_body.winfo_children():
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+
+            today_str = self.current_date.strftime("%Y-%m-%d")
+            insights = get_weekly_insights(self.db, self.current_date)
+            chk_stats = self.db.get_checklist_stats(today_str)
+            chk_pct = chk_stats.get("percent", 0)
+            insights.append(f"Checklist progress: {chk_stats.get('completed', 0)}/{chk_stats.get('total', 0)} tasks ({chk_pct}%) today.")
+            if total_focus_hours > 0:
+                insights.append(f"Recorded focus: {focus_val_str} of active timer work in {period_label.lower()}.")
+            elif total_hours > 0:
+                insights.append("Start a focus timer to record work against your plan.")
+
+            for item in insights:
+                row = ctk.CTkFrame(self.insights_body, fg_color="transparent")
+                row.pack(fill="x", pady=3)
+                ctk.CTkLabel(row, text="•", font=FONTS["body_bold"], text_color=theme_color("accent")).pack(side="left", padx=(0, 6), anchor="n")
+                label = ctk.CTkLabel(row, text=item, font=FONTS["small"], text_color=theme_color("text_primary"), wraplength=380, justify="left", anchor="w")
+                label.pack(side="left", fill="x", expand=True)
+                def wrap_insight(event=None, lbl=label, container=row):
+                    if (not container.winfo_exists() or not self.winfo_viewable()
+                            or not container.winfo_viewable() or not lbl.winfo_viewable()):
+                        return
+                    physical_width = event.width if event is not None else container.winfo_width()
+                    width = max(80, round(physical_width / lbl._get_widget_scaling() - 30))
+                    if lbl.cget("wraplength") != width:
+                        lbl.configure(wraplength=width)
+                row.bind("<Configure>", wrap_insight)
+                row.bind("<Map>", lambda event, callback=wrap_insight: self.after_idle(callback))
+
+    def _redraw_charts(self, event=None):
+        if self._chart_data:
+            categories, total, daily, start, end = self._chart_data
+            self._draw_pie_chart(categories, total)
+            self._draw_bar_chart(daily, start, end)
 
     def _draw_pie_chart(self, cat_hours: dict, total_hours: float):
         self.canvas_pie.delete("all")
@@ -212,7 +363,7 @@ class AnalyticsView(ctk.CTkFrame):
             if hrs <= 0:
                 continue
             extent = (hrs / total_hours) * 360.0
-            color = CATEGORY_COLORS.get(cat, COLORS["accent"])
+            color = self._category_colors.get(cat, CATEGORY_COLORS.get(cat, COLORS["accent"]))
 
             # Arc
             self.canvas_pie.create_arc(
@@ -241,12 +392,12 @@ class AnalyticsView(ctk.CTkFrame):
         hole_r = 42
         self.canvas_pie.create_oval(cx - hole_r, cy - hole_r, cx + hole_r, cy + hole_r, fill=COLORS["bg_secondary"], outline="")
         self.canvas_pie.create_text(cx, cy - 6, text=f"{total_hours:.1f}h", font=FONTS["body_bold"], fill=COLORS["text_primary"])
-        self.canvas_pie.create_text(cx, cy + 10, text="Total", font=FONTS["micro"], fill=COLORS["text_muted"])
+        self.canvas_pie.create_text(cx, cy + 10, text="Total", font=FONTS["micro"], fill=COLORS["text_secondary"])
 
     def _draw_bar_chart(self, daily_hours: dict, start_d: date, end_d: date):
         self.canvas_bar.delete("all")
-        w = 420
-        h = 220
+        w = max(160, self.canvas_bar.winfo_width())
+        h = max(120, self.canvas_bar.winfo_height())
         pad_x = 35
         pad_y = 30
         chart_w = w - pad_x * 2
@@ -256,7 +407,7 @@ class AnalyticsView(ctk.CTkFrame):
         max_hrs = max([val for val in daily_hours.values()] + [4.0])
 
         col_w = chart_w / num_days
-        show_labels_every = max(1, num_days // 10)
+        show_labels_every = max(1, round(num_days / max(1, chart_w // 35)))
 
         curr = start_d
         idx = 0
@@ -282,7 +433,7 @@ class AnalyticsView(ctk.CTkFrame):
             # Day label below
             if idx % show_labels_every == 0 or is_today:
                 day_txt = curr.strftime("%a") if num_days <= 7 else str(curr.day)
-                tc = COLORS["today_accent"] if is_today else COLORS["text_muted"]
+                tc = COLORS["today_accent"] if is_today else COLORS["text_secondary"]
                 self.canvas_bar.create_text(
                     (bx1 + bx2) / 2, by2 + 12,
                     text=day_txt, font=FONTS["small_bold" if is_today else "micro"], fill=tc
@@ -292,7 +443,7 @@ class AnalyticsView(ctk.CTkFrame):
             idx += 1
 
 
-class AnalyticsDashboard(ctk.CTkToplevel):
+class AnalyticsDashboard(AppToplevel):
     """Backwards-compatible standalone window wrapper."""
     def __init__(self, master, db: TimographyDB):
         super().__init__(master)
@@ -300,7 +451,11 @@ class AnalyticsDashboard(ctk.CTkToplevel):
         self.title("Timography — Time Analytics & Insights")
         self.geometry("960x680")
         self.minsize(860, 580)
-        self.configure(fg_color=COLORS["bg_primary"])
+        self.configure(fg_color=theme_color("bg_primary"))
 
-        view = AnalyticsView(self, db)
-        view.pack(fill="both", expand=True)
+        self.view = AnalyticsView(self, db)
+        self.view.pack(fill="both", expand=True)
+
+    def reapply_theme(self):
+        self.configure(fg_color=theme_color("bg_primary"))
+        self.view.reapply_theme()

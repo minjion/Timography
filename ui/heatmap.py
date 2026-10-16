@@ -1,7 +1,8 @@
 """GitHub-style activity and productivity heatmap component for Timography."""
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 import tkinter as tk
 import customtkinter as ctk
+from ui.theme import theme_color
 from ui.theme import COLORS, FONTS
 from ui.tooltip import CanvasTooltip
 
@@ -17,7 +18,7 @@ HEAT_LEVELS = [
 
 class ActivityHeatmap(ctk.CTkFrame):
     def __init__(self, master, data_by_date: dict = None, weeks: int = 24, **kwargs):
-        super().__init__(master, fg_color=COLORS["bg_secondary"], corner_radius=8, **kwargs)
+        super().__init__(master, fg_color=theme_color("bg_secondary"), corner_radius=8, **kwargs)
         self.data_by_date = data_by_date or {}
         self.weeks = weeks
         self.cell_size = 11
@@ -38,14 +39,28 @@ class ActivityHeatmap(ctk.CTkFrame):
         )
         self.canvas.pack(fill="both", expand=True, padx=8, pady=8)
         self.tooltip = CanvasTooltip(self.canvas)
+        self.canvas.bind("<Configure>", lambda e: self.render())
         self.render()
 
     def set_data(self, data_by_date: dict):
         self.data_by_date = data_by_date or {}
         self.render()
 
+    def reapply_theme(self):
+        """Re-skin heatmap in-place when theme toggles."""
+        try:
+            self.configure(fg_color=theme_color("bg_secondary"))
+            self.canvas.configure(bg=COLORS["bg_secondary"])
+        except Exception:
+            pass
+        self.render()
+
     def render(self):
+        self.tooltip.clear()
         self.canvas.delete("all")
+        width = self.canvas.winfo_width()
+        if width > 40:
+            self.cell_size = max(5, min(11, int((width - 40) / self.weeks) - self.cell_pad))
         today = datetime.now().date()
         # Find ending Sunday
         end_date = today + timedelta(days=(6 - today.weekday()))
@@ -71,14 +86,17 @@ class ActivityHeatmap(ctk.CTkFrame):
             hours = self.data_by_date.get(d_str, 0.0)
 
             # Determine color
-            fill_color = HEAT_LEVELS[0][1]
-            for threshold, col_val in HEAT_LEVELS:
-                if hours <= threshold:
-                    fill_color = col_val
-                    break
+            if hours <= 0:
+                fill_color = COLORS["bg_tertiary"]
+            else:
+                fill_color = HEAT_LEVELS[-1][1]
+                for threshold, col_val in HEAT_LEVELS[1:]:
+                    if hours <= threshold:
+                        fill_color = col_val
+                        break
 
             cell_tag = f"cell_{d_str}"
-            item_id = self.canvas.create_rectangle(
+            self.canvas.create_rectangle(
                 x1, y1, x2, y2,
                 fill=fill_color,
                 outline=COLORS["border"] if hours == 0 else "",
