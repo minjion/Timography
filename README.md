@@ -2,6 +2,8 @@
 
 A local Windows day planner for your schedule, tasks and focused work. No account or cloud sync is required. The app stores its data in SQLite and works offline after its dependencies are installed.
 
+**New desktop overhaul:** run **start-next.bat** to try the Qt task-to-focus workflow. It uses a persistent independent copy of your planner; changes do not synchronize with the existing app. **start.bat** still opens the existing application. See [Timography Next](docs/TIMOGRAPHY_NEXT.md) for the implemented workflow, data handling and remaining migration work.
+
 ## Plan, work, review
 
 - **Today** brings together your current/next event, agenda, task capture, completion progress and focus minutes. Start focus directly from an event or a pending task.

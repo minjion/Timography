@@ -1,0 +1,36 @@
+name: Windows checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    env:
+      QT_QUICK_BACKEND: software
+      QT_QPA_PLATFORM: offscreen
+      QT_QPA_FONTDIR: C:\Windows\Fonts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-next.txt
+      - name: Install runtime and checks
+        run: python -m pip install -r requirements-next.txt ruff
+      - name: Lint
+        run: ruff check .
+      - name: Test shared core and Qt adapter
+        run: python -m unittest discover -s tests -v
+      - name: Compile Python
+        run: python -m compileall -q core ui desktop_qt main.py main_qt.py config.py scripts tests
+      - name: Check dependency consistency
+        run: python -m pip check
+      - name: Load and exercise Qt interface
+        run: python scripts/qt_smoke.py
+      - name: Verify Qt startup and shutdown
+        run: python scripts/qt_startup_smoke.py

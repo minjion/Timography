@@ -237,6 +237,8 @@ class TimographyDB:
         except sqlite3.Error as e:
             logger.error(f"Failed to initialize database: {e}")
             raise
+        from core.task_migrations import migrate_tasks
+        migrate_tasks(conn)
 
     def add_event(self, title: str, description: str, start_time: str, end_time: str, date: str, color: str, category: str, recurring: str, reminder_minutes: int) -> int:
         validate_schedule(locals())
@@ -624,6 +626,12 @@ class TimographyDB:
         conn = self._get_conn()
         schedule = self.get_events_for_date(date_str)
         existing = self.get_checklist(date_str)
+        # A task with several blocks keeps one canonical checklist identity. Later
+        # block dates must not create another task for the same calendar event.
+        managed_sources = {(row[0], row[1]) for row in conn.execute(
+            "SELECT b.event_id, b.source_routine_id FROM task_blocks b "
+            "JOIN checklist_items c ON c.id = b.task_id WHERE substr(b.start, 1, 10) = ?", (date_str,))}
+        protected = {row[0] for row in conn.execute("SELECT task_id FROM task_details")}
         linked = {(item["event_id"], item["routine_id"]): item for item in existing
                   if item["event_id"] is not None or item["routine_id"] is not None}
         next_order = max((item["sort_order"] for item in existing), default=-1) + 1
@@ -631,6 +639,8 @@ class TimographyDB:
                        for event in schedule}
         with conn:
             for item in existing:
+                if item["id"] in protected:
+                    continue
                 source = (item["event_id"], item["routine_id"])
                 if source != (None, None) and source not in active_keys:
                     if item["is_completed"]:
@@ -641,9 +651,9 @@ class TimographyDB:
                 key = (None, event["routine_id"]) if event["is_routine"] else (event["id"], None)
                 title = f"{event['title']} ({event['start_time']} - {event['end_time']})"
                 if key in linked:
-                    if linked[key]["title"] != title:
+                    if linked[key]["id"] not in protected and linked[key]["title"] != title:
                         conn.execute("UPDATE checklist_items SET title = ? WHERE id = ?", (title, linked[key]["id"]))
-                else:
+                elif key not in managed_sources:
                     conn.execute("INSERT INTO checklist_items (title, event_id, routine_id, date, sort_order) "
                                  "VALUES (?, ?, ?, ?, ?)", (title, *key, date_str, next_order))
                     next_order += 1

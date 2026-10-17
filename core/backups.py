@@ -23,7 +23,12 @@ REQUIRED_COLUMNS = {
     "action_log": {"id", "action_type", "target_type", "target_id", "old_data", "new_data", "is_undone"},
     "sent_reminders": {"event_id", "reminder_date"},
 }
-OPTIONAL_COLUMNS = {"pomodoro_focus_days": {"session_id", "date", "seconds"}}
+OPTIONAL_COLUMNS = {
+    "pomodoro_focus_days": {"session_id", "date", "seconds"},
+    "task_details": {"task_id", "category", "notes", "estimate_minutes"},
+    "task_blocks": {"id", "task_id", "start", "end", "event_id", "source_routine_id", "owns_event"},
+    "task_session_links": {"session_id", "task_id"},
+}
 
 
 class BackupManager:

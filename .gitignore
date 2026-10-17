@@ -89,4 +89,5 @@ artifacts/ui-audit/
 *.db-shm
 data/*.lock
 data/backups/
+data/preview/
 artifacts/release-qa/
